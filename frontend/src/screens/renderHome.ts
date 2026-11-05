@@ -1,14 +1,5 @@
-/*
-PURPOSE: Builds the initial landing page UI (Login, Register, Host, Join).
-CONTENTS:
-- Injects the HTML for the login/registration forms and the "Host Game" / "Join Game" inputs.
-- Grabs the form elements using document.getElementById() and attaches 'submit' event listeners.
-- On login submit, calls the login endpoint via api.ts, hands the result to auth.ts, 
-  and tells main.ts to re-render the screen.
-- On "Join Game" submit, reads the 4-letter room code from the input and calls the join API.
-*/
-
-import { apiLogin, apiCreateMatch, apiJoinMatch } from '../api';
+import { escapeHtml, errorText } from '../ui';
+import { apiLogin, apiCreateMatch, apiJoinMatch, apiLogout } from '../api';
 import { getCurrentUser, saveUser, logout } from '../auth';
 import { navigateTo, setActiveMatchId } from '../main';
 
@@ -24,6 +15,9 @@ export function renderHome(container: HTMLElement): void {
                         <label class="form-label">Username</label>
                         <input id="username-input" class="form-control" required placeholder="Enter any username" />
                     </div>
+                    <label class="form-label" for="password-input">Password</label>
+                    <input id="password-input" type="password" class="form-control mb-3" required autocomplete="current-password" />
+                    <p id="login-error" class="text-danger" role="alert"></p>
                     <button type="submit" class="btn btn-danger w-100">Login / Quick Register</button>
                 </form>
             </div>
@@ -33,9 +27,14 @@ export function renderHome(container: HTMLElement): void {
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             const username = (document.getElementById('username-input') as HTMLInputElement).value;
-            const loggedInUser = await apiLogin(username);
-            saveUser(loggedInUser);
-            navigateTo('home');
+            try {
+                const password = (document.getElementById('password-input') as HTMLInputElement).value;
+                const loggedInUser = await apiLogin(username, password);
+                saveUser(loggedInUser);
+                navigateTo('home');
+            } catch (error) {
+                document.getElementById('login-error')!.textContent = errorText(error);
+            }
         });
         return;
     }
@@ -43,7 +42,7 @@ export function renderHome(container: HTMLElement): void {
     container.innerHTML = `
         <div class="card p-4 mx-auto" style="max-width: 480px;">
             <div class="d-flex justify-content-between align-items-center mb-3">
-                <h4 class="m-0">Welcome, ${user.username}</h4>
+                <h4 class="m-0">Welcome, ${escapeHtml(user.username)}</h4>
                 <button id="logout-btn" class="btn btn-sm btn-outline-secondary">Logout</button>
             </div>
             <button id="host-btn" class="btn btn-danger w-100 mb-3">Host New Game</button>
@@ -55,15 +54,18 @@ export function renderHome(container: HTMLElement): void {
         </div>
     `;
 
-    document.getElementById('logout-btn')?.addEventListener('click', () => {
+    document.getElementById('logout-btn')?.addEventListener('click', async () => {
+        try { await apiLogout(); } catch (error) { alert(errorText(error)); return; }
         logout();
         navigateTo('home');
     });
 
     document.getElementById('host-btn')?.addEventListener('click', async () => {
-        const lobby = await apiCreateMatch(user.id);
-        setActiveMatchId(lobby.match.id);
-        navigateTo('lobby');
+        try {
+            const lobby = await apiCreateMatch(user.id);
+            setActiveMatchId(lobby.match.id);
+            navigateTo('lobby');
+        } catch (error) { alert(errorText(error)); }
     });
 
     document.getElementById('join-form')?.addEventListener('submit', async (e) => {
@@ -73,8 +75,8 @@ export function renderHome(container: HTMLElement): void {
             const lobby = await apiJoinMatch(code, user.id);
             setActiveMatchId(lobby.match.id);
             navigateTo('lobby');
-        } catch {
-            alert('Room not found!');
+        } catch (error) {
+            alert(errorText(error));
         }
     });
 }

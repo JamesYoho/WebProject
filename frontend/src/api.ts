@@ -1,84 +1,29 @@
-/*
-PURPOSE: The dedicated bridge between the frontend and the Flask backend.
-CONTENTS:
-- Contains all fetch() calls. No fetch() should appear anywhere else in the project.
-- Exported functions like:
-  - submitDrawings(matchId: string, b64Images: string[]): Promise<boolean>
-  - fetchMatchStatus(matchId: string): Promise<MatchState>
-- Handles parsing JSON responses and catching HTTP errors (like 401 Unauthorized or 500 Server Error).
-*/
+import { User, LobbyState, Prompt, SubmitDrawingsPayload, DrawingToGuess, SubmitGuessesPayload, MatchResults } from './types';
 
-import {
-    User,
-    LobbyState,
-    Prompt,
-    SubmitDrawingsPayload,
-    DrawingToGuess,
-    SubmitGuessesPayload,
-    MatchResults
-} from './types';
-
-export async function apiLogin(username: string, password = 'password'): Promise<User> {
-    const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
+export class ApiError extends Error {
+    constructor(message: string, public status: number) { super(message); }
+}
+async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+    const response = await fetch(`/api${path}`, {
+        method, credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-Pictionary-Request': '1' },
+        body: body === undefined ? undefined : JSON.stringify(body)
     });
-    if (!res.ok) throw new Error('Login failed');
-    return res.json();
+    const data = await response.json();
+    if (!response.ok) throw new ApiError(data.error || 'Request failed.', response.status);
+    return data as T;
 }
-
-export async function apiCreateMatch(userId: number): Promise<LobbyState> {
-    const res = await fetch('/api/match/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId })
-    });
-    return res.json();
-}
-
-export async function apiJoinMatch(roomCode: string, userId: number): Promise<LobbyState> {
-    const res = await fetch('/api/match/join', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ roomCode, userId })
-    });
-    if (!res.ok) throw new Error('Room not found');
-    return res.json();
-}
-
-export async function apiGetLobby(matchId: number): Promise<LobbyState> {
-    const res = await fetch(`/api/match/${matchId}/lobby`);
-    return res.json();
-}
-
-export async function apiGetPrompts(): Promise<Prompt[]> {
-    const res = await fetch('/api/prompts');
-    return res.json();
-}
-
-export async function apiSubmitDrawings(payload: SubmitDrawingsPayload): Promise<void> {
-    await fetch(`/api/match/${payload.matchId}/drawings`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-    });
-}
-
-export async function apiGetDrawingsToGuess(matchId: number): Promise<DrawingToGuess[]> {
-    const res = await fetch(`/api/match/${matchId}/drawings`);
-    return res.json();
-}
-
-export async function apiSubmitGuesses(payload: SubmitGuessesPayload): Promise<void> {
-    await fetch(`/api/match/${payload.matchId}/guesses`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-    });
-}
-
-export async function apiGetResults(matchId: number): Promise<MatchResults> {
-    const res = await fetch(`/api/match/${matchId}/results`);
-    return res.json();
-}
+export const apiLogin = (username: string, password: string) => request<User>('/auth/login', 'POST', { username, password });
+export const apiMe = () => request<User>('/auth/me');
+export const apiLogout = () => request<void>('/auth/logout', 'POST');
+export const apiCreateMatch = (_userId: number) => request<LobbyState>('/match/create', 'POST', {});
+export const apiJoinMatch = (roomCode: string, _userId: number) => request<LobbyState>('/match/join', 'POST', { roomCode });
+export const apiGetLobby = (id: number) => request<LobbyState>(`/match/${id}/lobby`);
+export const apiSetWords = (id: number, words: string[]) => request<void>(`/match/${id}/words`, 'PUT', { words });
+export const apiKick = (id: number, userId: number) => request<void>(`/match/${id}/players/${userId}`, 'DELETE');
+export const apiStart = (id: number) => request<void>(`/match/${id}/start`, 'POST');
+export const apiGetPrompts = (id: number) => request<Prompt[]>(`/match/${id}/prompts`);
+export const apiSubmitDrawings = (payload: SubmitDrawingsPayload) => request<void>(`/match/${payload.matchId}/drawings`, 'POST', payload);
+export const apiGetDrawingsToGuess = (id: number) => request<DrawingToGuess[]>(`/match/${id}/drawings`);
+export const apiSubmitGuesses = (payload: SubmitGuessesPayload) => request<void>(`/match/${payload.matchId}/guesses`, 'POST', payload);
+export const apiGetResults = (id: number) => request<MatchResults>(`/match/${id}/results`);
