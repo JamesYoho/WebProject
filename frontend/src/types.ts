@@ -21,6 +21,7 @@ export type GameRole = 'drawer' | 'guesser';
 export interface Match {
     id: number;
     roomCode: string;
+    ownerId: number | null;
     status: MatchStatus;
 }
 
@@ -34,6 +35,7 @@ export interface Participant {
 export interface LobbyState {
     match: Match;
     participants: Participant[];
+    words: string[];
 }
 
 export interface Prompt {

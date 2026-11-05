@@ -95,3 +95,16 @@ class Guess(db.Model):
 
     drawing: Mapped["Drawing"] = relationship(back_populates="guess")
     guesser: Mapped["User"] = relationship(back_populates="guesses")
+
+class MatchSettings(db.Model):
+    """Separate table so existing databases need no destructive migration."""
+    __tablename__ = 'match_settings'
+    match_id: Mapped[int] = mapped_column(ForeignKey('matches.id'), primary_key=True)
+    owner_id: Mapped[int] = mapped_column(ForeignKey('users.id'), nullable=False)
+    prompt_ids = mapped_column(db.JSON, nullable=False)
+
+
+class RemovedPlayer(db.Model):
+    __tablename__ = 'removed_players'
+    match_id: Mapped[int] = mapped_column(ForeignKey('matches.id'), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id'), primary_key=True)

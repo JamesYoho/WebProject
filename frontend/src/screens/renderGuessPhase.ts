@@ -1,34 +1,20 @@
-/*
-PURPOSE: Builds the UI for the Guesser's 10-second blitz rounds.
-CONTENTS:
-- Prior to starting, it polls the Flask server to see if the Drawer has submitted their 5 images.
-- Once the images are fetched, it injects an <img> tag and a text <input> for guessing.
-- Runs a 10-second countdown timer for Image #1. 
-- At 0 seconds (or if the user hits Enter), it saves the text input, clears the text box, 
-  updates the <img> tag's src attribute to Image #2 (Base64 string), and restarts the timer.
-- After 5 rounds, it packages all 5 guesses and POSTs them to the server via api.ts, 
-  then transitions to the scoreboard.
-*/
-
+import { errorText } from '../ui';
 import { apiGetDrawingsToGuess, apiSubmitGuesses } from '../api';
 import { getCurrentUser } from '../auth';
-import { navigateTo } from '../main';
+import { navigateTo, onScreenLeave, isScreenActive } from '../main';
 import { GuessSubmission } from '../types';
 
 export async function renderGuessPhase(container: HTMLElement, matchId: number): Promise<void> {
     const drawings = await apiGetDrawingsToGuess(matchId);
+    if (!isScreenActive('guess')) return;
     const user = getCurrentUser();
 
     if (drawings.length === 0) {
-        container.innerHTML = `
-            <div class="alert alert-warning text-center">
-                No drawings submitted for this match yet!
-                <div class="mt-3">
-                    <button id="go-draw-btn" class="btn btn-danger">Draw First</button>
-                </div>
-            </div>
-        `;
-        document.getElementById('go-draw-btn')?.addEventListener('click', () => navigateTo('draw'));
+        container.innerHTML = '<div class="alert alert-info">Waiting for drawings…</div>';
+        const timer = window.setTimeout(() => {
+            if (isScreenActive('guess')) navigateTo('guess');
+        }, 2000);
+        onScreenLeave(() => clearTimeout(timer));
         return;
     }
 
@@ -53,8 +39,10 @@ export async function renderGuessPhase(container: HTMLElement, matchId: number):
     const img = document.getElementById('guess-img') as HTMLImageElement;
     const counter = document.getElementById('guess-counter') as HTMLElement;
 
+    let submitting = false;
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
+        if (submitting) return;
         guesses.push({
             drawingId: drawings[currentIndex].drawingId,
             guessText: input.value
@@ -62,12 +50,17 @@ export async function renderGuessPhase(container: HTMLElement, matchId: number):
 
         currentIndex++;
         if (currentIndex >= drawings.length) {
+            submitting = true;
+            try {
             await apiSubmitGuesses({
                 matchId,
                 guesserId: user?.id ?? 1,
                 guesses
             });
-            navigateTo('scorecard');
+            if (isScreenActive('guess')) navigateTo('scorecard');
+            } catch (error) {
+                if (isScreenActive('guess')) { alert(errorText(error)); navigateTo('lobby'); }
+            }
             return;
         }
 
