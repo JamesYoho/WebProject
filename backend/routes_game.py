@@ -2,6 +2,7 @@ import random
 import string
 from flask import Blueprint, request, jsonify, g, abort
 from models import db, Match, Participant, Prompt, Drawing, Guess, MatchStatus, GameRole, UserRole, MatchSettings, RemovedPlayer
+from sqlalchemy.sql import func
 
 game_bp = Blueprint('game', __name__, url_prefix='/api')
 
@@ -30,19 +31,25 @@ def check_game_membership():
         membership(request.view_args['match_id'])
 
 
-@game_bp.route('/match/<int:match_id>/words', methods=['PUT'])
-def set_words(match_id):
-    match = membership(match_id)
-    if g.user.role != UserRole.ADMIN:
-        abort(403, description='Only admins can change, add, or remove words.')
-    settings = db.session.get(MatchSettings, match_id)
-    if settings is None:
-        abort(409, description='Please create a new game.')
-    if match.status != MatchStatus.LOBBY or match.drawings:
-        abort(409, description='Words can only change before drawing starts.')
+@game_bp.route('/words', methods=['GET'])
+def get_word_bank():
+    if g.user.role != UserRole.MODERATOR:
+        abort(403, description='Only moderators can view and edit the word bank.')
+    # Only fetch active words (difficulty > 0)
+    words = list(db.session.scalars(
+        db.select(Prompt.word).filter(Prompt.difficulty > 0).order_by(Prompt.id)
+    ))
+    return jsonify(words=words)
+
+@game_bp.route('/words', methods=['PUT'])
+def set_word_bank():
+    if g.user.role != UserRole.MODERATOR:
+        abort(403, description='Only moderators can change, add, or remove words.')
+
     words = (request.get_json() or {}).get('words')
     if not isinstance(words, list) or not 1 <= len(words) <= 50:
         abort(400, description='Enter 1–50 words, one per line.')
+
     cleaned = []
     for word in words:
         if not isinstance(word, str) or not 1 <= len(word.strip()) <= 100:
@@ -50,17 +57,26 @@ def set_words(match_id):
         word = word.strip()
         if word.casefold() not in {w.casefold() for w in cleaned}:
             cleaned.append(word)
-    ids = []
-    for word in cleaned:
-        prompt = db.session.scalar(db.select(Prompt).filter_by(word=word))
-        if prompt is None:
-            prompt = Prompt(word=word, difficulty=1)
-            db.session.add(prompt)
-            db.session.flush()
-        ids.append(prompt.id)
-    settings.prompt_ids = ids
+
+    cleaned_map = {w.casefold(): w for w in cleaned}
+    existing_prompts = list(db.session.scalars(db.select(Prompt)))
+    existing_map = {p.word.casefold(): p for p in existing_prompts}
+
+    # 1. Archive removed words (set difficulty = 0) so old drawings keep their foreign key
+    for lower_word, prompt in existing_map.items():
+        if lower_word not in cleaned_map:
+            prompt.difficulty = 0
+
+    # 2. Reactivate existing words or insert brand-new ones (difficulty = 1)
+    for lower_word, original_word in cleaned_map.items():
+        if lower_word in existing_map:
+            existing_map[lower_word].difficulty = 1
+            existing_map[lower_word].word = original_word
+        else:
+            db.session.add(Prompt(word=original_word, difficulty=1))
+
     db.session.commit()
-    return jsonify(status='ok')
+    return jsonify(status='ok', words=cleaned)
 
 
 @game_bp.route('/match/<int:match_id>/players/<int:user_id>', methods=['DELETE'])
@@ -91,16 +107,22 @@ def generate_room_code() -> str:
 
 @game_bp.route('/match/create', methods=['POST'])
 def create_match():
-    data = request.get_json()
-    user_id = g.user.id
+    if g.user.role == UserRole.MODERATOR:
+        abort(403, description='Moderators cannot host or play in matches.')
 
+    user_id = g.user.id
     code = generate_room_code()
     while db.session.scalar(db.select(Match).filter_by(room_code=code)):
         code = generate_room_code()
+
     match = Match(room_code=code, status=MatchStatus.LOBBY)
     db.session.add(match)
     db.session.flush()
-    ids = list(db.session.scalars(db.select(Prompt.id).order_by(Prompt.id).limit(3)))
+
+    # Pull up to 5 random words from the Moderator's global Prompt table
+    ids = list(db.session.scalars(
+        db.select(Prompt.id).filter(Prompt.difficulty > 0).order_by(func.random()).limit(5)
+    ))
     db.session.add(MatchSettings(match_id=match.id, owner_id=g.user.id, prompt_ids=ids))
 
     participant = Participant(
@@ -116,6 +138,8 @@ def create_match():
 
 @game_bp.route('/match/join', methods=['POST'])
 def join_match():
+    if g.user.role == UserRole.MODERATOR:
+        abort(403, description='Moderators cannot host or play in matches.')
     data = request.get_json()
     room_code = data.get('roomCode', '').upper().strip()
     user_id = g.user.id
@@ -171,7 +195,7 @@ def get_lobby(match_id: int):
         },
         "participants": participants,
         "words": [db.session.get(Prompt, pid).word for pid in settings.prompt_ids]
-            if settings and g.user.role == UserRole.ADMIN else []
+            if settings and g.user.role == UserRole.MODERATOR else []
     })
 
 @game_bp.route('/match/<int:match_id>/prompts', methods=['GET'])

@@ -44,11 +44,11 @@ def api_error(error):
     return jsonify(error=error.description), error.code
 
 
-@app.cli.command('create-admin')
+@app.cli.command('create-moderator')
 @click.argument('username')
 @click.password_option(confirmation_prompt=True)
-def create_admin(username, password):
-    """Create or promote an administrator, setting their password."""
+def create_moderator(username, password):
+    """Create or promote a moderator, setting their password."""
     username = username.strip()
     if not username or not password:
         raise click.ClickException('Username and password are required.')
@@ -56,10 +56,10 @@ def create_admin(username, password):
     if user is None:
         user = User(username=username, password_hash=generate_password_hash(password))
         db.session.add(user)
-    user.role = UserRole.ADMIN
+    user.role = UserRole.MODERATOR
     user.password_hash = generate_password_hash(password)
     db.session.commit()
-    click.echo(f'Administrator {username} is ready.')
+    click.echo(f'Moderator {username} is ready.')
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

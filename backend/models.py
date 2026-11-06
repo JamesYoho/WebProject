@@ -21,7 +21,7 @@ db = SQLAlchemy()
 
 class UserRole(PyEnum):
     PLAYER = 'player'
-    ADMIN = 'admin'
+    MODERATOR = 'moderator'
 
 class MatchStatus(PyEnum):
     LOBBY = 'lobby'

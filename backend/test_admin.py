@@ -1,4 +1,4 @@
-"""Run with: python -m unittest -v test_admin"""
+"""Run with: python -m unittest -v test_moderator"""
 import unittest
 from flask import Flask
 from werkzeug.security import generate_password_hash
@@ -7,7 +7,7 @@ from routes_auth import auth_bp
 from routes_game import game_bp
 
 
-class AdminTests(unittest.TestCase):
+class ModeratorTests(unittest.TestCase):
     def setUp(self):
         self.app = Flask(__name__)
         self.app.config.update(TESTING=True, SECRET_KEY='test-only', SQLALCHEMY_DATABASE_URI='sqlite://')
@@ -17,7 +17,7 @@ class AdminTests(unittest.TestCase):
         self.context = self.app.app_context()
         self.context.push()
         db.create_all()
-        for name, role in [('host', UserRole.ADMIN), ('other', UserRole.ADMIN), ('player', UserRole.PLAYER)]:
+        for name, role in [('host', UserRole.MODERATOR), ('other', UserRole.MODERATOR), ('player', UserRole.PLAYER)]:
             db.session.add(User(username=name, password_hash=generate_password_hash('test-pass'), role=role))
         db.session.add_all([Prompt(word=w) for w in ['Cat', 'Sun', 'Pizza']])
         db.session.commit()
@@ -52,7 +52,7 @@ class AdminTests(unittest.TestCase):
     def test_anonymous_and_forged_role(self):
         anon = self.app.test_client()
         self.assertEqual(self.send(anon, '/api/match/create', {'userId': self.hid}).status_code, 401)
-        result = self.send(anon, '/api/auth/login', {'username': 'admin', 'password': 'new', 'role': 'admin'})
+        result = self.send(anon, '/api/auth/login', {'username': 'moderator', 'password': 'new', 'role': 'moderator'})
         self.assertEqual(result.get_json()['role'], 'player')
         game = self.send(anon, '/api/match/create', {}).get_json()
         self.assertEqual(self.send(anon, f"/api/match/{game['match']['id']}/words", {'words': ['Forbidden']}, 'PUT').status_code, 403)
@@ -108,7 +108,7 @@ class AdminTests(unittest.TestCase):
         self.assertEqual(result['teamScores']['1'], 1)
         self.assertEqual(result['rounds'][0]['drawerUsername'], 'host')
 
-    def test_regular_host_controls_and_admin_word_editing(self):
+    def test_regular_host_controls_and_moderator_word_editing(self):
         state = self.send(self.player, '/api/match/create', {}).get_json()
         base = f"/api/match/{state['match']['id']}"
         self.assertEqual(self.send(self.player, base+'/words', {'words': ['No']}, 'PUT').status_code, 403)
