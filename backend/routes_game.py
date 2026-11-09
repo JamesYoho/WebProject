@@ -35,45 +35,58 @@ def check_game_membership():
 def get_word_bank():
     if g.user.role != UserRole.MODERATOR:
         abort(403, description='Only moderators can view and edit the word bank.')
-    # Only fetch active words (difficulty > 0)
-    words = list(db.session.scalars(
-        db.select(Prompt.word).filter(Prompt.difficulty > 0).order_by(Prompt.id)
-    ))
-    return jsonify(words=words)
+
+    prompts = list(db.session.scalars(db.select(Prompt).order_by(Prompt.id)))
+    return jsonify(words=[
+        {"word": p.word, "difficulty": p.difficulty}
+        for p in prompts
+    ])
 
 @game_bp.route('/words', methods=['PUT'])
 def set_word_bank():
     if g.user.role != UserRole.MODERATOR:
         abort(403, description='Only moderators can change, add, or remove words.')
 
-    words = (request.get_json() or {}).get('words')
-    if not isinstance(words, list) or not 1 <= len(words) <= 50:
-        abort(400, description='Enter 1–50 words, one per line.')
+    raw_words = (request.get_json() or {}).get('words')
+    if not isinstance(raw_words, list) or not 1 <= len(raw_words) <= 50:
+        abort(400, description='Enter 1–50 words.')
 
     cleaned = []
-    for word in words:
+    seen = set()
+    for item in raw_words:
+        if not isinstance(item, dict):
+            abort(400, description='Each word entry must include a word and difficulty.')
+
+        word = item.get('word')
+        difficulty = item.get('difficulty', 1)
+
         if not isinstance(word, str) or not 1 <= len(word.strip()) <= 100:
             abort(400, description='Each word must contain 1–100 characters.')
-        word = word.strip()
-        if word.casefold() not in {w.casefold() for w in cleaned}:
-            cleaned.append(word)
+        if difficulty not in (1, 2, 3):
+            abort(400, description='Difficulty must be Easy (1), Medium (2), or Hard (3).')
 
-    cleaned_map = {w.casefold(): w for w in cleaned}
+        word = word.strip()
+        key = word.casefold()
+        if key not in seen:
+            seen.add(key)
+            cleaned.append({"word": word, "difficulty": int(difficulty)})
+
+    cleaned_map = {item["word"].casefold(): item for item in cleaned}
     existing_prompts = list(db.session.scalars(db.select(Prompt)))
     existing_map = {p.word.casefold(): p for p in existing_prompts}
 
-    # 1. Archive removed words (set difficulty = 0) so old drawings keep their foreign key
+    # Hard-delete words that were removed
     for lower_word, prompt in existing_map.items():
         if lower_word not in cleaned_map:
-            prompt.difficulty = 0
+            db.session.delete(prompt)
 
-    # 2. Reactivate existing words or insert brand-new ones (difficulty = 1)
-    for lower_word, original_word in cleaned_map.items():
+    # Update existing words or insert new ones
+    for lower_word, item in cleaned_map.items():
         if lower_word in existing_map:
-            existing_map[lower_word].difficulty = 1
-            existing_map[lower_word].word = original_word
+            existing_map[lower_word].word = item["word"]
+            existing_map[lower_word].difficulty = item["difficulty"]
         else:
-            db.session.add(Prompt(word=original_word, difficulty=1))
+            db.session.add(Prompt(word=item["word"], difficulty=item["difficulty"]))
 
     db.session.commit()
     return jsonify(status='ok', words=cleaned)
@@ -92,13 +105,32 @@ def kick_player(match_id, user_id):
     db.session.commit()
     return jsonify(status='ok')
 
-
 @game_bp.route('/match/<int:match_id>/start', methods=['POST'])
-def start_match(match_id):
+def start_match(match_id: int):
     match, settings = owned_game(match_id)
     if match.status != MatchStatus.LOBBY:
         abort(409, description='This game has already started.')
+
+    data = request.get_json() or {}
+    difficulty = int(data.get('difficulty', 1))
+    draw_time = int(data.get('drawTime', 10))
+
+    # Pick random words matching ONLY the host's selected difficulty
+    ids = list(db.session.scalars(
+        db.select(Prompt.id)
+        .filter_by(difficulty=difficulty)
+        .order_by(func.random())
+        .limit(3)  # Or 5, depending on how many rounds you want
+    ))
+
+    if not ids:
+        abort(400, description=f'No words found for difficulty tier {difficulty}. Add some in Moderator Mode first.')
+
+    settings.prompt_ids = ids
+    settings.difficulty = difficulty
+    settings.draw_time = draw_time
     match.status = MatchStatus.DRAWING
+
     db.session.commit()
     return jsonify(status='ok')
 
@@ -120,9 +152,7 @@ def create_match():
     db.session.flush()
 
     # Pull up to 5 random words from the Moderator's global Prompt table
-    ids = list(db.session.scalars(
-        db.select(Prompt.id).filter(Prompt.difficulty > 0).order_by(func.random()).limit(5)
-    ))
+    ids = list(db.session.scalars(db.select(Prompt.id).order_by(func.random()).limit(5)))
     db.session.add(MatchSettings(match_id=match.id, owner_id=g.user.id, prompt_ids=ids))
 
     participant = Participant(
@@ -191,11 +221,11 @@ def get_lobby(match_id: int):
             "id": match.id,
             "roomCode": match.room_code,
             "status": match.status.value,
-            "ownerId": settings.owner_id if settings else None
+            "ownerId": settings.owner_id if settings else None,
+            "difficulty": settings.difficulty if settings else 1,
+            "drawTime": settings.draw_time if settings else 10
         },
-        "participants": participants,
-        "words": [db.session.get(Prompt, pid).word for pid in settings.prompt_ids]
-            if settings and g.user.role == UserRole.MODERATOR else []
+        "participants": participants
     })
 
 @game_bp.route('/match/<int:match_id>/prompts', methods=['GET'])

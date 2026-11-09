@@ -21,8 +21,10 @@ export type GameRole = 'drawer' | 'guesser';
 export interface Match {
     id: number;
     roomCode: string;
-    ownerId: number | null;
-    status: MatchStatus;
+    status: 'lobby' | 'drawing' | 'guessing' | 'finished';
+    ownerId?: number;
+    difficulty?: number;
+    drawTime?: number;
 }
 
 export interface Participant {
