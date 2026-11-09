@@ -39,6 +39,23 @@ def login():
     session['user_id'] = user.id
     return jsonify(user_json(user))
 
+@auth_bp.route('/role', methods=['POST'])
+def set_role():
+    if getattr(g, 'user', None) is None:
+        abort(401, description='Log in first.')
+    data = request.get_json() or {}
+    new_role = data.get('role')
+    if new_role not in ('moderator', 'player'):
+        abort(400, description='Invalid role.')
+
+    g.user.role = UserRole.MODERATOR if new_role == 'moderator' else UserRole.PLAYER
+    db.session.commit()
+    return jsonify({
+        "id": g.user.id,
+        "username": g.user.username,
+        "role": g.user.role.value
+    })
+
 
 @auth_bp.route('/me')
 def me():

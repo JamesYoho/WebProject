@@ -7,7 +7,7 @@
  */
 
 
-export type UserRole = 'player' | 'admin';
+export type UserRole = 'player' | 'moderator';
 
 export interface User {
     id: number;
