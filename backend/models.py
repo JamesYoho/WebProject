@@ -70,7 +70,10 @@ class Prompt(db.Model):
     word: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     difficulty: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
 
-    drawings: Mapped[List["Drawing"]] = relationship(back_populates="prompt")
+    drawings: Mapped[list["Drawing"]] = relationship(
+        back_populates="prompt",
+        cascade="all, delete-orphan"
+    )
 
 class Drawing(db.Model):
     __tablename__ = 'drawings'
@@ -102,6 +105,9 @@ class MatchSettings(db.Model):
     match_id: Mapped[int] = mapped_column(ForeignKey('matches.id'), primary_key=True)
     owner_id: Mapped[int] = mapped_column(ForeignKey('users.id'), nullable=False)
     prompt_ids = mapped_column(db.JSON, nullable=False)
+
+    difficulty: Mapped[int] = mapped_column(db.Integer, default=1)
+    draw_time: Mapped[int] = mapped_column(db.Integer, default=10)
 
 
 class RemovedPlayer(db.Model):

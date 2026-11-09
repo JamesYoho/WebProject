@@ -22,14 +22,16 @@ export async function renderLobby(container: HTMLElement, matchId: number): Prom
         return;
     }
 
-    // Moderators are strictly blocked from entering game lobbies
-    if (user.role === 'moderator') {
+    if (user.role.toLowerCase() === 'moderator') {
         navigateTo('moderator');
         return;
     }
 
+    // Stored outside refreshLobby() so the 2-second poll doesn't wipe the host's selection
+    let selectedDifficulty = 1;
+    let selectedDrawTime = 10;
+
     async function refreshLobby(): Promise<void> {
-        // Stop polling if the user navigated away and this container is no longer in the DOM
         if (!document.body.contains(container)) {
             stopLobbyPolling();
             return;
@@ -38,7 +40,6 @@ export async function renderLobby(container: HTMLElement, matchId: number): Prom
         try {
             const lobby: LobbyState = await apiGetLobby(matchId);
 
-            // If the match has started, kill the lobby timer immediately and move to the game
             if (lobby.match.status === 'drawing') {
                 stopLobbyPolling();
                 navigateTo('draw');
@@ -75,8 +76,27 @@ export async function renderLobby(container: HTMLElement, matchId: number): Prom
 
             const hostControlsHtml = (isHost && lobby.match.status === 'lobby') ? `
                 <div class="mt-4 pt-3 border-top border-secondary">
-                    <h6 class="text-secondary text-uppercase small fw-bold mb-2">Host Controls</h6>
-                    <button id="start-game-btn" class="btn w-100 fw-bold py-2" style="background-color: #E50914; color: white; border: none;">
+                    <h6 class="text-secondary text-uppercase small fw-bold mb-3">Host Settings</h6>
+                    <div class="d-flex gap-3 mb-3">
+                        <div class="w-50">
+                            <label class="form-label small text-secondary mb-1">Clue Difficulty</label>
+                            <select id="setting-difficulty" class="form-select bg-dark text-light border-secondary">
+                                <option value="1" ${selectedDifficulty === 1 ? 'selected' : ''}>Easy</option>
+                                <option value="2" ${selectedDifficulty === 2 ? 'selected' : ''}>Medium</option>
+                                <option value="3" ${selectedDifficulty === 3 ? 'selected' : ''}>Hard</option>
+                            </select>
+                        </div>
+                        <div class="w-50">
+                            <label class="form-label small text-secondary mb-1">Time per Drawing</label>
+                            <select id="setting-time" class="form-select bg-dark text-light border-secondary">
+                                <option value="10" ${selectedDrawTime === 10 ? 'selected' : ''}>10 Seconds</option>
+                                <option value="15" ${selectedDrawTime === 15 ? 'selected' : ''}>15 Seconds</option>
+                                <option value="20" ${selectedDrawTime === 20 ? 'selected' : ''}>20 Seconds</option>
+                                <option value="30" ${selectedDrawTime === 30 ? 'selected' : ''}>30 Seconds</option>
+                            </select>
+                        </div>
+                    </div>
+                    <button id="start-game-btn" class="btn w-100 fw-bold py-2" style="background-color: #dc3545; color: white; border: none;">
                         Start Game
                     </button>
                 </div>
@@ -104,16 +124,34 @@ export async function renderLobby(container: HTMLElement, matchId: number): Prom
                 navigateTo('home');
             });
 
-            document.getElementById('start-game-btn')?.addEventListener('click', async () => {
-                try {
-                    await apiStart(matchId);
-                    stopLobbyPolling();
-                    navigateTo('draw');
-                } catch (error) {
-                    const errEl = document.getElementById('lobby-error');
-                    if (errEl) errEl.textContent = errorText(error);
-                }
-            });
+            if (isHost && lobby.match.status === 'lobby') {
+                const diffSelect = document.getElementById('setting-difficulty') as HTMLSelectElement | null;
+                const timeSelect = document.getElementById('setting-time') as HTMLSelectElement | null;
+
+                diffSelect?.addEventListener('change', () => {
+                    selectedDifficulty = Number(diffSelect.value);
+                    // Snap to recommended time for that difficulty
+                    if (selectedDifficulty === 1) selectedDrawTime = 10;
+                    if (selectedDifficulty === 2) selectedDrawTime = 15;
+                    if (selectedDifficulty === 3) selectedDrawTime = 20;
+                    if (timeSelect) timeSelect.value = String(selectedDrawTime);
+                });
+
+                timeSelect?.addEventListener('change', () => {
+                    selectedDrawTime = Number(timeSelect.value);
+                });
+
+                document.getElementById('start-game-btn')?.addEventListener('click', async () => {
+                    try {
+                        await apiStart(matchId, selectedDifficulty, selectedDrawTime);
+                        stopLobbyPolling();
+                        navigateTo('draw');
+                    } catch (error) {
+                        const errEl = document.getElementById('lobby-error');
+                        if (errEl) errEl.textContent = errorText(error);
+                    }
+                });
+            }
 
             container.querySelectorAll('.kick-btn').forEach(btn => {
                 btn.addEventListener('click', async () => {
